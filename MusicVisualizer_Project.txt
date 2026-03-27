@@ -1,0 +1,1344 @@
+================================================================================
+MUSIC VISUALIZER + SYNTHESIZER — COMPLETE PROJECT GUIDE
+Java + JavaFX College Project
+================================================================================
+
+This document contains everything needed to build a Music Visualizer and
+Synthesizer desktop application using Java 21 and JavaFX 21. It includes
+architecture, full source code for every file, build instructions, and
+ready-to-use AI prompts. An AI assistant can read this document and implement
+any part of the project from it directly.
+
+
+================================================================================
+SECTION 1 — PROJECT OVERVIEW
+================================================================================
+
+The application captures audio from a microphone or file, performs real-time
+FFT signal processing, renders animated visualizations on a JavaFX Canvas, and
+includes an interactive piano keyboard that synthesizes custom waveforms.
+
+FEATURES:
+- Bar spectrum: FFT frequency bins as animated colored bars
+- Oscilloscope: raw PCM waveform as glowing trace
+- Circular visualizer: spectrum bars in a radial ring
+- Spectrogram: scrolling heatmap of frequency over time
+- Beat detection: energy-based BPM tracking with flash + particle effects
+- Piano keyboard: interactive 2-octave clickable keyboard
+- Synthesizer: sine, square, sawtooth, triangle waveforms
+- ADSR envelope: attack/decay/sustain/release per note
+- Preset manager: save and load synth settings to JSON
+
+
+================================================================================
+SECTION 2 — MAVEN SETUP
+================================================================================
+
+STEP 1 — CREATE PROJECT IN INTELLIJ:
+- File > New Project > Maven Archetype
+- Archetype: org.apache.maven.archetypes:maven-archetype-quickstart
+- Name: MusicVisualizer
+- GroupId: com.musicviz
+- ArtifactId: musicvisualizer
+- Version: 1.0-SNAPSHOT
+- JDK: 21
+
+STEP 2 — REPLACE pom.xml WITH THE FOLLOWING:
+
+------------------------------------------------------------
+FILE: pom.xml
+------------------------------------------------------------
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.musicviz</groupId>
+    <artifactId>musicvisualizer</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <javafx.version>21.0.1</javafx.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+        <dependency>
+            <groupId>javazoom</groupId>
+            <artifactId>jlayer</artifactId>
+            <version>1.0.1</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>com.musicviz.ui.MainApp</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+
+
+================================================================================
+SECTION 3 — FOLDER STRUCTURE
+================================================================================
+
+After creating the project, delete App.java and AppTest.java that Maven
+generates. Create the following folder and file structure exactly:
+
+MusicVisualizer/
+  src/main/java/com/musicviz/
+    audio/
+      AudioCapture.java
+      AudioFilePlayer.java
+      FFTProcessor.java
+      BeatDetector.java
+      WaveformBuffer.java
+      SynthEngine.java
+      ADSREnvelope.java
+    ui/
+      MainApp.java
+      MainLayout.java
+      VisualizerCanvas.java
+      PianoKeyboard.java
+      ControlPanel.java
+    model/
+      AudioData.java
+      SynthPreset.java
+      VisualizerTheme.java
+    util/
+      JsonUtil.java
+      ColorMapper.java
+  src/main/resources/
+    styles/
+      main.css
+    presets/
+      default.json
+  module-info.java
+  pom.xml
+
+
+================================================================================
+SECTION 4 — module-info.java
+================================================================================
+
+------------------------------------------------------------
+FILE: src/main/java/module-info.java
+------------------------------------------------------------
+module com.musicviz {
+    requires javafx.controls;
+    requires javafx.fxml;
+    requires org.apache.commons.math3;
+    requires com.google.code.gson;
+    requires java.desktop;
+    opens com.musicviz.ui to javafx.fxml;
+    exports com.musicviz.ui;
+}
+
+
+================================================================================
+SECTION 5 — COMPLETE SOURCE CODE
+================================================================================
+
+Every file below is complete and ready to copy into IntelliJ. The package
+declaration at the top of each file tells you where it lives.
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/ui/MainApp.java
+------------------------------------------------------------
+package com.musicviz.ui;
+
+import javafx.application.Application;
+import javafx.scene.Scene;
+import javafx.stage.Stage;
+
+public class MainApp extends Application {
+
+    @Override
+    public void start(Stage stage) {
+        MainLayout layout = new MainLayout();
+        Scene scene = new Scene(layout.getRoot(), 1280, 720);
+        scene.getStylesheets().add(
+            getClass().getResource("/styles/main.css").toExternalForm());
+        stage.setTitle("Music Visualizer + Synthesizer");
+        stage.setScene(scene);
+        stage.setOnCloseRequest(e -> layout.shutdown());
+        stage.show();
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/audio/WaveformBuffer.java
+------------------------------------------------------------
+package com.musicviz.audio;
+
+import java.util.concurrent.locks.ReentrantLock;
+
+// Thread-safe ring buffer. The audio capture thread writes samples here.
+// The JavaFX AnimationTimer reads samples from here every frame.
+public class WaveformBuffer {
+
+    private final double[] data;
+    private int writePos = 0;
+    private final ReentrantLock lock = new ReentrantLock();
+
+    public WaveformBuffer(int capacity) {
+        data = new double[capacity];
+    }
+
+    public void write(double[] samples) {
+        lock.lock();
+        try {
+            for (double s : samples) {
+                data[writePos % data.length] = s;
+                writePos++;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public double[] read(int count) {
+        lock.lock();
+        try {
+            double[] out = new double[count];
+            int start = writePos - count;
+            for (int i = 0; i < count; i++) {
+                int idx = (start + i + data.length * 2) % data.length;
+                out[i] = data[idx];
+            }
+            return out;
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/audio/AudioCapture.java
+------------------------------------------------------------
+package com.musicviz.audio;
+
+import javax.sound.sampled.*;
+
+// Captures raw PCM audio from the default microphone.
+// Runs in a background daemon thread.
+// Converts raw bytes to doubles in range [-1.0, 1.0] and writes to WaveformBuffer.
+public class AudioCapture implements Runnable {
+
+    public static final int SAMPLE_RATE = 44100;
+    public static final int BUFFER_SIZE = 2048;
+
+    private final WaveformBuffer buffer;
+    private volatile boolean running = false;
+    private TargetDataLine line;
+
+    public AudioCapture(WaveformBuffer buffer) {
+        this.buffer = buffer;
+    }
+
+    @Override
+    public void run() {
+        try {
+            AudioFormat fmt = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
+            DataLine.Info info = new DataLine.Info(TargetDataLine.class, fmt);
+            line = (TargetDataLine) AudioSystem.getLine(info);
+            line.open(fmt);
+            line.start();
+            running = true;
+            byte[] raw = new byte[BUFFER_SIZE * 2];
+            while (running) {
+                int read = line.read(raw, 0, raw.length);
+                double[] samples = toDoubles(raw, read);
+                buffer.write(samples);
+            }
+        } catch (LineUnavailableException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private double[] toDoubles(byte[] raw, int len) {
+        double[] out = new double[len / 2];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (raw[2 * i + 1] << 8 | (raw[2 * i] & 0xFF)) / 32768.0;
+        }
+        return out;
+    }
+
+    public void stop() {
+        running = false;
+        if (line != null) {
+            line.stop();
+            line.close();
+        }
+    }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/audio/FFTProcessor.java
+------------------------------------------------------------
+package com.musicviz.audio;
+
+import org.apache.commons.math3.complex.Complex;
+import org.apache.commons.math3.transform.*;
+
+// Applies a Hanning window to reduce spectral leakage then runs FFT.
+// Input: raw PCM samples (length must be a power of 2, e.g. 2048).
+// Output: magnitude array of length N/2 representing frequency bins.
+// Bin i corresponds to frequency: i * (sampleRate / N)
+public class FFTProcessor {
+
+    private final FastFourierTransformer fft =
+        new FastFourierTransformer(DftNormalization.STANDARD);
+
+    public double[] process(double[] samples) {
+        double[] windowed = applyHanning(samples);
+        Complex[] result = fft.transform(windowed, TransformType.FORWARD);
+        int half = result.length / 2;
+        double[] magnitudes = new double[half];
+        for (int i = 0; i < half; i++) {
+            magnitudes[i] = result[i].abs();
+        }
+        return magnitudes;
+    }
+
+    private double[] applyHanning(double[] in) {
+        int N = in.length;
+        double[] out = new double[N];
+        for (int i = 0; i < N; i++) {
+            double w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+            out[i] = in[i] * w;
+        }
+        return out;
+    }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/audio/BeatDetector.java
+------------------------------------------------------------
+package com.musicviz.audio;
+
+import java.util.LinkedList;
+import java.util.Queue;
+
+// Energy-based beat detector.
+// Sums squared magnitudes in bass bins (2-10, roughly 60-200 Hz).
+// A beat fires when instantaneous energy exceeds THRESHOLD * average of
+// the last HISTORY frames, with a minimum cooldown of 200ms between beats.
+public class BeatDetector {
+
+    private static final int HISTORY = 43;
+    private static final double THRESHOLD = 1.4;
+    private static final int BASS_LOW = 2;
+    private static final int BASS_HIGH = 10;
+
+    private final Queue<Double> history = new LinkedList<>();
+    private long lastBeatMs = 0;
+
+    public boolean detect(double[] magnitudes) {
+        double energy = 0;
+        for (int i = BASS_LOW; i <= BASS_HIGH; i++) {
+            energy += magnitudes[i] * magnitudes[i];
+        }
+
+        history.offer(energy);
+        if (history.size() > HISTORY) history.poll();
+
+        double avg = history.stream()
+            .mapToDouble(Double::doubleValue)
+            .average()
+            .orElse(1.0);
+
+        long now = System.currentTimeMillis();
+        if (energy > THRESHOLD * avg && now - lastBeatMs > 200) {
+            lastBeatMs = now;
+            return true;
+        }
+        return false;
+    }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/audio/ADSREnvelope.java
+------------------------------------------------------------
+package com.musicviz.audio;
+
+// Shapes note amplitude over time through 4 phases:
+// ATTACK  — amplitude rises from 0 to 1 over attackMs milliseconds
+// DECAY   — amplitude falls from 1 to sustainLevel over decayMs milliseconds
+// SUSTAIN — amplitude holds at sustainLevel while key is held
+// RELEASE — amplitude falls from current level to 0 over releaseMs milliseconds
+public class ADSREnvelope {
+
+    public enum Phase { ATTACK, DECAY, SUSTAIN, RELEASE, DONE }
+
+    private final double attackMs;
+    private final double decayMs;
+    private final double sustainLevel;
+    private final double releaseMs;
+
+    private Phase phase = Phase.DONE;
+    private long startTime;
+    private long releaseStart;
+    private double releaseStartLevel;
+
+    public ADSREnvelope(double attackMs, double decayMs,
+                        double sustainLevel, double releaseMs) {
+        this.attackMs = attackMs;
+        this.decayMs = decayMs;
+        this.sustainLevel = sustainLevel;
+        this.releaseMs = releaseMs;
+    }
+
+    public void noteOn() {
+        phase = Phase.ATTACK;
+        startTime = System.currentTimeMillis();
+    }
+
+    public void noteOff() {
+        releaseStartLevel = getLevel();
+        phase = Phase.RELEASE;
+        releaseStart = System.currentTimeMillis();
+    }
+
+    public double getLevel() {
+        long now = System.currentTimeMillis();
+        long t = now - startTime;
+        return switch (phase) {
+            case ATTACK  -> Math.min(1.0, t / attackMs);
+            case DECAY   -> 1.0 - (1.0 - sustainLevel)
+                              * Math.min(1.0, (t - attackMs) / decayMs);
+            case SUSTAIN -> sustainLevel;
+            case RELEASE -> releaseStartLevel
+                              * Math.max(0, 1.0 - (now - releaseStart) / releaseMs);
+            default      -> 0.0;
+        };
+    }
+
+    public void updatePhase() {
+        long t = System.currentTimeMillis() - startTime;
+        if (phase == Phase.ATTACK && t >= attackMs) phase = Phase.DECAY;
+        else if (phase == Phase.DECAY && t >= attackMs + decayMs) phase = Phase.SUSTAIN;
+        else if (phase == Phase.RELEASE && getLevel() <= 0.001) phase = Phase.DONE;
+    }
+
+    public boolean isDone() { return phase == Phase.DONE; }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/audio/SynthEngine.java
+------------------------------------------------------------
+package com.musicviz.audio;
+
+import javax.sound.sampled.*;
+import java.util.*;
+
+// Polyphonic synthesizer engine.
+// Generates audio samples for multiple simultaneous notes (voices).
+// Supports SINE, SQUARE, SAW, TRIANGLE waveforms with ADSR shaping.
+// Writes mixed output to a SourceDataLine at 44100 Hz 16-bit mono.
+public class SynthEngine {
+
+    public enum WaveType { SINE, SQUARE, SAW, TRIANGLE }
+
+    private static class Voice {
+        double freq;
+        WaveType wave;
+        ADSREnvelope env;
+        double phase = 0;
+
+        Voice(double freq, WaveType wave, ADSREnvelope env) {
+            this.freq = freq;
+            this.wave = wave;
+            this.env = env;
+        }
+    }
+
+    private final List<Voice> voices = Collections.synchronizedList(new ArrayList<>());
+    private SourceDataLine out;
+    private final int sampleRate = 44100;
+    private WaveType waveType = WaveType.SINE;
+
+    public SynthEngine() {
+        try {
+            AudioFormat fmt = new AudioFormat(sampleRate, 16, 1, true, false);
+            out = AudioSystem.getSourceDataLine(fmt);
+            out.open(fmt, 4096);
+            out.start();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void noteOn(double freq) {
+        ADSREnvelope env = new ADSREnvelope(10, 80, 0.7, 300);
+        env.noteOn();
+        voices.add(new Voice(freq, waveType, env));
+    }
+
+    public void noteOff(double freq) {
+        voices.stream()
+            .filter(v -> Math.abs(v.freq - freq) < 0.01 && !v.env.isDone())
+            .forEach(v -> v.env.noteOff());
+    }
+
+    // Call this in a loop from a background thread, e.g. render(256) per iteration.
+    public void render(int numSamples) {
+        byte[] buf = new byte[numSamples * 2];
+        for (int i = 0; i < numSamples; i++) {
+            double mixed = 0;
+            synchronized (voices) {
+                voices.removeIf(v -> v.env.isDone());
+                for (Voice v : voices) {
+                    v.env.updatePhase();
+                    mixed += sample(v) * v.env.getLevel();
+                }
+            }
+            mixed = Math.max(-1, Math.min(1, mixed / Math.max(1, voices.size())));
+            short val = (short) (mixed * 32767);
+            buf[2 * i]     = (byte) (val & 0xFF);
+            buf[2 * i + 1] = (byte) (val >> 8);
+        }
+        out.write(buf, 0, buf.length);
+    }
+
+    private double sample(Voice v) {
+        v.phase += 2 * Math.PI * v.freq / sampleRate;
+        if (v.phase > 2 * Math.PI) v.phase -= 2 * Math.PI;
+        return switch (v.wave) {
+            case SINE     -> Math.sin(v.phase);
+            case SQUARE   -> Math.sin(v.phase) >= 0 ? 1.0 : -1.0;
+            case SAW      -> (v.phase / Math.PI) - 1.0;
+            case TRIANGLE -> 2.0 / Math.PI * Math.asin(Math.sin(v.phase));
+        };
+    }
+
+    public void setWaveType(WaveType w) { this.waveType = w; }
+
+    public void shutdown() {
+        out.drain();
+        out.close();
+    }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/ui/VisualizerCanvas.java
+------------------------------------------------------------
+package com.musicviz.ui;
+
+import javafx.animation.AnimationTimer;
+import javafx.scene.canvas.*;
+import javafx.scene.paint.*;
+import com.musicviz.audio.*;
+import java.util.*;
+
+// Core rendering class. Runs at 60fps using AnimationTimer.
+// Each frame: reads samples from WaveformBuffer, runs FFT, detects beats,
+// draws the selected visualization mode, updates particles.
+public class VisualizerCanvas {
+
+    public enum Mode { BARS, OSCILLOSCOPE, CIRCULAR, SPECTROGRAM }
+
+    private final Canvas canvas;
+    private final GraphicsContext gc;
+    private final WaveformBuffer waveBuffer;
+    private final FFTProcessor fft = new FFTProcessor();
+    private final BeatDetector beatDetector = new BeatDetector();
+
+    private Mode mode = Mode.BARS;
+    private double[] smoothedBars;
+    private final List<Particle> particles = new ArrayList<>();
+    private double flashAlpha = 0;
+
+    private static final int SPEC_HISTORY = 300;
+    private final LinkedList<double[]> specHistory = new LinkedList<>();
+
+    public VisualizerCanvas(WaveformBuffer buf) {
+        this.waveBuffer = buf;
+        canvas = new Canvas(900, 500);
+        gc = canvas.getGraphicsContext2D();
+    }
+
+    public void start() {
+        new AnimationTimer() {
+            public void handle(long now) {
+                double[] samples = waveBuffer.read(2048);
+                double[] mags = fft.process(samples);
+                boolean beat = beatDetector.detect(mags);
+                if (beat) triggerBeat();
+                render(samples, mags);
+            }
+        }.start();
+    }
+
+    private void render(double[] samples, double[] mags) {
+        // Dark transparent fill creates motion blur trail effect
+        gc.setFill(Color.rgb(10, 10, 20, 0.85));
+        gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        // White flash overlay fades out after beat
+        if (flashAlpha > 0) {
+            gc.setFill(Color.rgb(255, 255, 255, Math.min(flashAlpha, 0.4)));
+            gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+            flashAlpha -= 0.04;
+        }
+
+        switch (mode) {
+            case BARS         -> drawBars(mags);
+            case OSCILLOSCOPE -> drawOscilloscope(samples);
+            case CIRCULAR     -> drawCircular(mags);
+            case SPECTROGRAM  -> drawSpectrogram(mags);
+        }
+
+        updateParticles();
+    }
+
+    // Draws 64 frequency bars. Color shifts from blue (bass) to red (treble).
+    // Bars use exponential smoothing so they don't jump harshly between frames.
+    private void drawBars(double[] mags) {
+        int bars = 64;
+        if (smoothedBars == null) smoothedBars = new double[bars];
+        double w = canvas.getWidth() / bars;
+        double h = canvas.getHeight();
+        for (int i = 0; i < bars; i++) {
+            int bin = (int) (i * (mags.length / 2.0) / bars);
+            double target = Math.min(1.0, mags[bin] * 5);
+            smoothedBars[i] = smoothedBars[i] * 0.8 + target * 0.2;
+            double barH = smoothedBars[i] * h * 0.85;
+            double hue = 240 - (i / (double) bars) * 240;
+            gc.setFill(Color.hsb(hue, 1.0, 1.0, 0.85));
+            gc.fillRoundRect(i * w + 1, h - barH, w - 2, barH, 4, 4);
+        }
+    }
+
+    // Draws the raw PCM waveform as a glowing cyan line.
+    private void drawOscilloscope(double[] samples) {
+        double w = canvas.getWidth(), h = canvas.getHeight();
+        gc.setStroke(Color.rgb(0, 255, 180, 0.9));
+        gc.setLineWidth(2.0);
+        gc.beginPath();
+        for (int i = 0; i < samples.length; i++) {
+            double x = i / (double) samples.length * w;
+            double y = h / 2 + samples[i] * h * 0.4;
+            if (i == 0) gc.moveTo(x, y);
+            else gc.lineTo(x, y);
+        }
+        gc.stroke();
+    }
+
+    // Draws frequency bars arranged in a full circle.
+    private void drawCircular(double[] mags) {
+        double cx = canvas.getWidth() / 2;
+        double cy = canvas.getHeight() / 2;
+        double baseR = 100;
+        int bars = 128;
+        for (int i = 0; i < bars; i++) {
+            int bin = (int) (i * (mags.length / 2.0) / bars);
+            double mag = Math.min(1.0, mags[bin] * 5);
+            double angle = 2 * Math.PI * i / bars;
+            double r1 = baseR;
+            double r2 = baseR + mag * 150;
+            double hue = (i / (double) bars) * 360;
+            gc.setStroke(Color.hsb(hue, 1.0, 1.0, 0.8));
+            gc.setLineWidth(2);
+            gc.strokeLine(
+                cx + r1 * Math.cos(angle), cy + r1 * Math.sin(angle),
+                cx + r2 * Math.cos(angle), cy + r2 * Math.sin(angle)
+            );
+        }
+    }
+
+    // Scrolling heatmap. Each column is one FFT frame. Color = frequency intensity.
+    private void drawSpectrogram(double[] mags) {
+        int bins = 128;
+        double[] row = new double[bins];
+        for (int i = 0; i < bins; i++) {
+            int bin = (int) (i * (mags.length / 2.0) / bins);
+            row[i] = Math.min(1.0, mags[bin] * 4);
+        }
+        specHistory.addLast(row);
+        if (specHistory.size() > SPEC_HISTORY) specHistory.removeFirst();
+
+        double w = canvas.getWidth(), h = canvas.getHeight();
+        double colW = w / SPEC_HISTORY;
+        double rowH = h / bins;
+        int xi = 0;
+        for (double[] r : specHistory) {
+            for (int yi = 0; yi < bins; yi++) {
+                double v = r[yi];
+                gc.setFill(Color.hsb(240 - v * 240, 1, v));
+                gc.fillRect(xi * colW, h - (yi + 1) * rowH, colW + 1, rowH + 1);
+            }
+            xi++;
+        }
+    }
+
+    private void triggerBeat() {
+        flashAlpha = 0.4;
+        double cx = canvas.getWidth() / 2;
+        double cy = canvas.getHeight() / 2;
+        Random rng = new Random();
+        for (int i = 0; i < 40; i++) {
+            double angle = rng.nextDouble() * 2 * Math.PI;
+            double speed = 2 + rng.nextDouble() * 4;
+            particles.add(new Particle(
+                cx, cy,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed,
+                Color.hsb(rng.nextDouble() * 360, 1, 1)
+            ));
+        }
+    }
+
+    private void updateParticles() {
+        particles.removeIf(p -> p.life <= 0.05);
+        for (Particle p : particles) {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.1; // gravity
+            p.life *= 0.95;
+            gc.setFill(p.color.deriveColor(0, 1, 1, p.life));
+            gc.fillOval(p.x - 3, p.y - 3, 6, 6);
+        }
+    }
+
+    private static class Particle {
+        double x, y, vx, vy, life = 1.0;
+        Color color;
+        Particle(double x, double y, double vx, double vy, Color c) {
+            this.x = x; this.y = y;
+            this.vx = vx; this.vy = vy;
+            this.color = c;
+        }
+    }
+
+    public void setMode(Mode m) { this.mode = m; }
+    public Canvas getCanvas() { return canvas; }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/ui/PianoKeyboard.java
+------------------------------------------------------------
+package com.musicviz.ui;
+
+import javafx.scene.canvas.*;
+import javafx.scene.paint.Color;
+import com.musicviz.audio.SynthEngine;
+
+// Renders a 2-octave interactive piano keyboard (C4 to B5, 24 keys).
+// Mouse press triggers noteOn, mouse release triggers noteOff on SynthEngine.
+// Hit detection checks black keys before white keys because black keys overlap.
+public class PianoKeyboard {
+
+    // Equal temperament frequencies starting at C4 = 261.63 Hz
+    // Each semitone = previous * 2^(1/12)
+    private static final double[] FREQS = {
+        261.63, 277.18, 293.66, 311.13, 329.63, 349.23,
+        369.99, 392.00, 415.30, 440.00, 466.16, 493.88,
+        523.25, 554.37, 587.33, 622.25, 659.25, 698.46,
+        739.99, 783.99, 830.61, 880.00, 932.33, 987.77
+    };
+
+    // true = black key, false = white key (pattern repeats every octave)
+    private static final boolean[] IS_BLACK = {
+        false, true,  false, true,  false,
+        false, true,  false, true,  false, true, false,
+        false, true,  false, true,  false,
+        false, true,  false, true,  false, true, false
+    };
+
+    private final Canvas canvas;
+    private final GraphicsContext gc;
+    private final SynthEngine synth;
+    private final boolean[] pressed = new boolean[24];
+
+    public PianoKeyboard(SynthEngine synth) {
+        this.synth = synth;
+        canvas = new Canvas(700, 140);
+        gc = canvas.getGraphicsContext2D();
+        draw();
+        canvas.setOnMousePressed(e  -> handleClick(e.getX(), e.getY(), true));
+        canvas.setOnMouseReleased(e -> handleClick(e.getX(), e.getY(), false));
+    }
+
+    private void handleClick(double mx, double my, boolean on) {
+        int key = getKeyAt(mx, my);
+        if (key < 0 || key >= 24) return;
+        pressed[key] = on;
+        if (on) synth.noteOn(FREQS[key]);
+        else    synth.noteOff(FREQS[key]);
+        draw();
+    }
+
+    private int getKeyAt(double x, double y) {
+        int whites = 14;
+        double ww = canvas.getWidth() / whites;
+
+        // Check black keys first — they visually overlap white keys
+        if (y < canvas.getHeight() * 0.6) {
+            for (int i = 0; i < 24; i++) {
+                if (!IS_BLACK[i]) continue;
+                double bx = blackKeyX(i, ww);
+                if (x >= bx && x <= bx + ww * 0.6) return i;
+            }
+        }
+
+        // Then check white keys
+        int wi = (int) (x / ww);
+        int count = 0;
+        for (int i = 0; i < 24; i++) {
+            if (!IS_BLACK[i]) {
+                if (count == wi) return i;
+                count++;
+            }
+        }
+        return -1;
+    }
+
+    // Returns the x pixel position of a black key
+    private double blackKeyX(int keyIdx, double ww) {
+        int wc = 0;
+        for (int i = 0; i < keyIdx; i++) {
+            if (!IS_BLACK[i]) wc++;
+        }
+        return wc * ww - ww * 0.3;
+    }
+
+    private void draw() {
+        double w = canvas.getWidth(), h = canvas.getHeight();
+        int whites = 14;
+        double ww = w / whites;
+
+        gc.setFill(Color.BLACK);
+        gc.fillRect(0, 0, w, h);
+
+        // Draw white keys first
+        int wi = 0;
+        for (int i = 0; i < 24; i++) {
+            if (!IS_BLACK[i]) {
+                gc.setFill(pressed[i] ? Color.DEEPSKYBLUE : Color.WHITE);
+                gc.fillRoundRect(wi * ww + 1, 0, ww - 2, h - 2, 4, 4);
+                wi++;
+            }
+        }
+
+        // Draw black keys on top
+        for (int i = 0; i < 24; i++) {
+            if (IS_BLACK[i]) {
+                double bx = blackKeyX(i, ww);
+                gc.setFill(pressed[i] ? Color.DODGERBLUE : Color.BLACK);
+                gc.fillRect(bx, 0, ww * 0.6, h * 0.6);
+            }
+        }
+    }
+
+    public Canvas getCanvas() { return canvas; }
+}
+
+
+------------------------------------------------------------
+FILE: src/main/java/com/musicviz/ui/MainLayout.java
+------------------------------------------------------------
+package com.musicviz.ui;
+
+import javafx.geometry.Pos;
+import javafx.scene.layout.*;
+import javafx.scene.control.*;
+import com.musicviz.audio.*;
+
+// Root layout. Assembles all UI components and wires audio pipeline together.
+// BorderPane: top = control bar, center = visualizer canvas, bottom = piano.
+// Starts the audio capture thread and visualizer animation loop.
+public class MainLayout {
+
+    private final BorderPane root = new BorderPane();
+    private final WaveformBuffer buffer = new WaveformBuffer(8192);
+    private final SynthEngine synth = new SynthEngine();
+    private final AudioCapture capture = new AudioCapture(buffer);
+    private final VisualizerCanvas viz = new VisualizerCanvas(buffer);
+    private final PianoKeyboard piano = new PianoKeyboard(synth);
+    private Thread captureThread;
+
+    public MainLayout() {
+        root.setCenter(viz.getCanvas());
+        root.setBottom(piano.getCanvas());
+        root.setTop(buildControls());
+        root.setStyle("-fx-background-color: #0A0A14;");
+
+        // Start audio capture in background daemon thread
+        captureThread = new Thread(capture);
+        captureThread.setDaemon(true);
+        captureThread.start();
+
+        // Start 60fps render loop
+        viz.start();
+    }
+
+    private HBox buildControls() {
+        // Visualization mode selector
+        ComboBox<String> modeBox = new ComboBox<>();
+        modeBox.getItems().addAll("Bars", "Oscilloscope", "Circular", "Spectrogram");
+        modeBox.setValue("Bars");
+        modeBox.setOnAction(e -> viz.setMode(switch (modeBox.getValue()) {
+            case "Oscilloscope" -> VisualizerCanvas.Mode.OSCILLOSCOPE;
+            case "Circular"     -> VisualizerCanvas.Mode.CIRCULAR;
+            case "Spectrogram"  -> VisualizerCanvas.Mode.SPECTROGRAM;
+            default             -> VisualizerCanvas.Mode.BARS;
+        }));
+
+        // Waveform type selector for synthesizer
+        ComboBox<String> waveBox = new ComboBox<>();
+        waveBox.getItems().addAll("Sine", "Square", "Sawtooth", "Triangle");
+        waveBox.setValue("Sine");
+        waveBox.setOnAction(e -> synth.setWaveType(switch (waveBox.getValue()) {
+            case "Square"   -> SynthEngine.WaveType.SQUARE;
+            case "Sawtooth" -> SynthEngine.WaveType.SAW;
+            case "Triangle" -> SynthEngine.WaveType.TRIANGLE;
+            default         -> SynthEngine.WaveType.SINE;
+        }));
+
+        Label modeLabel = new Label("Visualizer:");
+        Label waveLabel = new Label("Waveform:");
+        modeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 13px;");
+        waveLabel.setStyle("-fx-text-fill: white; -fx-font-size: 13px;");
+
+        HBox bar = new HBox(12, modeLabel, modeBox, waveLabel, waveBox);
+        bar.setStyle("-fx-padding: 10; -fx-background-color: #12122A;");
+        bar.setAlignment(Pos.CENTER_LEFT);
+        return bar;
+    }
+
+    public BorderPane getRoot() { return root; }
+
+    public void shutdown() {
+        capture.stop();
+        synth.shutdown();
+    }
+}
+
+
+================================================================================
+SECTION 6 — CSS
+================================================================================
+
+------------------------------------------------------------
+FILE: src/main/resources/styles/main.css
+------------------------------------------------------------
+.root {
+    -fx-background-color: #0A0A14;
+}
+
+.combo-box {
+    -fx-background-color: #1E1E38;
+    -fx-text-fill: white;
+    -fx-border-color: #4A90D9;
+    -fx-border-radius: 4px;
+}
+
+.combo-box-popup .list-view {
+    -fx-background-color: #1E1E38;
+    -fx-border-color: #4A90D9;
+}
+
+.combo-box-popup .list-cell {
+    -fx-text-fill: white;
+    -fx-background-color: #1E1E38;
+}
+
+.combo-box-popup .list-cell:hover {
+    -fx-background-color: #2D4A70;
+}
+
+.combo-box .arrow-button {
+    -fx-background-color: #4A90D9;
+}
+
+.slider .thumb {
+    -fx-background-color: #4A90D9;
+}
+
+.slider .track {
+    -fx-background-color: #1E1E38;
+}
+
+
+================================================================================
+SECTION 7 — BUILD AND RUN
+================================================================================
+
+TO RUN FROM INTELLIJ:
+1. Click "Load Maven Changes" when pom.xml is saved (blue banner top right)
+2. Go to Run > Edit Configurations > + > Maven
+3. Set Command line to: javafx:run
+4. Set Working directory to: $ProjectFileDir$
+5. Click Apply then Run
+
+TO RUN FROM TERMINAL:
+  mvn clean package
+  mvn javafx:run
+
+COMMON ERRORS:
+
+LineUnavailableException
+  Cause: Microphone permission denied
+  Fix: Grant microphone access in system settings (Windows: Privacy > Microphone)
+
+JavaFX runtime components are missing
+  Cause: Running with java -jar instead of the Maven plugin
+  Fix: Always use mvn javafx:run, not java -jar
+
+FFT IllegalArgumentException: input length must be a power of 2
+  Cause: Buffer size not a power of 2
+  Fix: Use only 1024, 2048, or 4096 as buffer sizes
+
+NullPointerException in AnimationTimer handle()
+  Cause: Visualizer starts before audio thread has written any data
+  Fix: Add Thread.sleep(100) before viz.start() in MainLayout constructor
+
+No sound from piano keys
+  Cause: SourceDataLine not started
+  Fix: Verify out.start() is called after out.open() in SynthEngine constructor
+
+
+================================================================================
+SECTION 8 — AI PROMPT TEMPLATES
+================================================================================
+
+Paste any of these prompts directly into an AI assistant to generate,
+debug, or extend the project. Each prompt is fully self-contained.
+
+------------------------------------------------------------
+PROMPT 1 — PROJECT SETUP
+Use this to generate the Maven project skeleton from scratch.
+------------------------------------------------------------
+Create a Maven project called MusicVisualizer for Java 21 and JavaFX 21.
+The groupId is com.musicviz and artifactId is musicvisualizer.
+
+Add these dependencies to pom.xml:
+- org.openjfx:javafx-controls:21.0.1
+- org.openjfx:javafx-fxml:21.0.1
+- org.apache.commons:commons-math3:3.6.1
+- com.google.code.gson:gson:2.10.1
+- javazoom:jlayer:1.0.1
+- javafx-maven-plugin 0.0.8 with mainClass com.musicviz.ui.MainApp
+
+Also generate module-info.java that requires javafx.controls, javafx.fxml,
+org.apache.commons.math3, com.google.code.gson, and java.desktop.
+It should open com.musicviz.ui to javafx.fxml and export com.musicviz.ui.
+
+Show the complete pom.xml and module-info.java.
+
+------------------------------------------------------------
+PROMPT 2 — AUDIO CAPTURE AND BUFFER
+Use this to generate the audio input classes.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.audio.
+
+Create two files:
+
+1. WaveformBuffer.java
+A thread-safe ring buffer using ReentrantLock.
+Constructor: WaveformBuffer(int capacity)
+Method write(double[] samples): writes samples into the ring buffer sequentially,
+  wrapping around when full.
+Method read(int count): returns the most recent 'count' samples as a double array.
+
+2. AudioCapture.java
+Implements Runnable. Captures 44100 Hz, 16-bit, mono PCM from the default
+microphone using javax.sound.sampled TargetDataLine. Uses a buffer of 2048 frames.
+Converts raw bytes to doubles in range [-1.0, 1.0] using:
+  sample = (byte[2i+1] << 8 | (byte[2i] & 0xFF)) / 32768.0
+Writes converted samples to a WaveformBuffer instance.
+Has a stop() method that sets running=false and closes the line.
+
+Show the complete code for both files.
+
+------------------------------------------------------------
+PROMPT 3 — FFT PROCESSOR
+Use this to generate the frequency analysis class.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.audio.
+
+Create FFTProcessor.java using Apache Commons Math FastFourierTransformer
+with DftNormalization.STANDARD.
+
+Method process(double[] samples) must:
+1. Apply a Hanning window to the input:
+   w[i] = 0.5 * (1 - cos(2 * PI * i / (N - 1)))
+   windowed[i] = samples[i] * w[i]
+2. Run the FFT: fft.transform(windowed, TransformType.FORWARD)
+3. Return a double[] of magnitudes for the first N/2 bins using result[i].abs()
+
+The input length will always be 2048 (a power of 2).
+Show the complete class.
+
+------------------------------------------------------------
+PROMPT 4 — BEAT DETECTOR
+Use this to generate the beat detection class.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.audio.
+
+Create BeatDetector.java with a single method: boolean detect(double[] magnitudes)
+
+The method must:
+1. Compute instantaneous energy by summing magnitudes[i]^2 for i from 2 to 10
+   (these bins correspond to bass frequencies around 60-200 Hz at 44100 Hz
+   sample rate with 2048 FFT size).
+2. Maintain a history queue of the last 43 energy values using LinkedList<Double>.
+3. Compute the average energy across the history queue.
+4. Return true only if:
+   - instantaneous energy > 1.4 * average energy, AND
+   - at least 200ms have passed since the last detected beat
+   (use System.currentTimeMillis() for the cooldown).
+5. When returning true, update the lastBeatMs timestamp.
+
+Show the complete class.
+
+------------------------------------------------------------
+PROMPT 5 — SYNTHESIZER ENGINE
+Use this to generate the audio synthesis classes.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.audio.
+
+Create two files:
+
+1. ADSREnvelope.java
+An amplitude envelope with phases: ATTACK, DECAY, SUSTAIN, RELEASE, DONE.
+Constructor: ADSREnvelope(double attackMs, double decayMs,
+                          double sustainLevel, double releaseMs)
+noteOn(): sets phase to ATTACK, records start time.
+noteOff(): records release start time, stores current level, sets phase to RELEASE.
+getLevel(): returns amplitude 0.0-1.0 based on current phase and elapsed time.
+updatePhase(): advances phase when time thresholds are reached.
+isDone(): returns true when phase is DONE.
+
+2. SynthEngine.java
+Polyphonic synthesizer. Maintains a synchronized list of Voice objects.
+Each Voice has: double freq, WaveType wave, ADSREnvelope env, double phase.
+Enum WaveType: SINE, SQUARE, SAW, TRIANGLE.
+noteOn(double freq): creates a new Voice with a fresh ADSREnvelope and adds it.
+noteOff(double freq): calls noteOff() on voices matching the frequency.
+render(int numSamples): for each sample, sums all active voice outputs multiplied
+  by their ADSR level, clamps to [-1, 1], divides by voice count to prevent
+  clipping, converts to 16-bit PCM, and writes to a SourceDataLine at 44100 Hz.
+Waveform formulas:
+  SINE:     Math.sin(phase)
+  SQUARE:   sin(phase) >= 0 ? 1.0 : -1.0
+  SAW:      (phase / PI) - 1.0
+  TRIANGLE: (2.0 / PI) * asin(sin(phase))
+Phase increment per sample: 2 * PI * freq / sampleRate
+
+Show the complete code for both files.
+
+------------------------------------------------------------
+PROMPT 6 — VISUALIZER CANVAS
+Use this to generate the main rendering class.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.ui.
+
+Create VisualizerCanvas.java with these requirements:
+
+Fields:
+- Canvas (900x500), GraphicsContext, WaveformBuffer, FFTProcessor, BeatDetector
+- Mode enum: BARS, OSCILLOSCOPE, CIRCULAR, SPECTROGRAM
+- double[] smoothedBars for interpolation
+- List<Particle> particles (inner class with x, y, vx, vy, life, Color)
+- double flashAlpha for beat flash
+- LinkedList<double[]> specHistory with max size 300 for spectrogram
+
+AnimationTimer in start():
+Each frame: read 2048 samples from buffer, run FFT, detect beat,
+if beat: set flashAlpha=0.4, spawn 40 particles at canvas center with random
+angles and speeds 2-6, random HSB colors.
+Draw dark semi-transparent background (creates trail effect).
+Draw white flash overlay using flashAlpha, decrement by 0.04 per frame.
+Switch on mode to call the correct draw method.
+Update all particles: move by velocity, add 0.1 gravity to vy, multiply life by
+0.95, remove if life < 0.05, draw as small filled ovals.
+
+BARS mode: 64 bars, exponential smoothing factor 0.8/0.2, HSB hue 240 (blue)
+to 0 (red) across bars, height = magnitude * canvas height * 0.85.
+
+OSCILLOSCOPE mode: draw samples as a continuous path, y = height/2 + sample
+* height * 0.4, glowing cyan stroke Color.rgb(0, 255, 180, 0.9), lineWidth 2.
+
+CIRCULAR mode: 128 bars arranged in a full circle at radius 100 from center,
+each bar extends outward by magnitude * 150, full HSB rainbow across bars.
+
+SPECTROGRAM mode: each frame add a new column of 128 magnitude values to
+history, draw entire history as colored rectangles where color hue maps
+from 240 (blue, quiet) to 0 (red, loud).
+
+Show the complete class.
+
+------------------------------------------------------------
+PROMPT 7 — PIANO KEYBOARD
+Use this to generate the piano UI component.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.ui.
+
+Create PianoKeyboard.java that renders a 2-octave piano (24 keys, C4 to B5)
+on a JavaFX Canvas (700x140) and connects to SynthEngine.
+
+Key layout — IS_BLACK array defines which of the 24 keys are black:
+{false,true,false,true,false,false,true,false,true,false,true,false,
+ false,true,false,true,false,false,true,false,true,false,true,false}
+
+Frequencies — equal temperament starting at C4=261.63 Hz, multiply by
+2^(1/12) for each semitone. The 24 frequencies are:
+261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392.00,
+415.30, 440.00, 466.16, 493.88, 523.25, 554.37, 587.33, 622.25,
+659.25, 698.46, 739.99, 783.99, 830.61, 880.00, 932.33, 987.77
+
+Layout: 14 white keys fill the full canvas width. Black keys are 60% the
+width and 60% the height of white keys, positioned between white keys.
+Black key X position: count white keys before it, multiply by whiteKeyWidth,
+subtract 30% of whiteKeyWidth.
+
+Hit detection: check black keys first (they visually overlap white keys).
+Only check black keys if mouseY < 60% of canvas height.
+
+On press: set pressed[key]=true, call synth.noteOn(freq), redraw.
+On release: set pressed[key]=false, call synth.noteOff(freq), redraw.
+Pressed white keys: Color.DEEPSKYBLUE. Pressed black keys: Color.DODGERBLUE.
+
+Show the complete class.
+
+------------------------------------------------------------
+PROMPT 8 — MAIN LAYOUT
+Use this to wire all components together into the final application.
+------------------------------------------------------------
+I am building a JavaFX music visualizer in package com.musicviz.ui.
+
+Create MainLayout.java that assembles the full application.
+
+It must:
+- Create a WaveformBuffer(8192), SynthEngine, AudioCapture(buffer),
+  VisualizerCanvas(buffer), and PianoKeyboard(synth)
+- Use a BorderPane as root: top=controls, center=visualizer canvas, bottom=piano
+- Set root background to #0A0A14
+- Start AudioCapture in a daemon thread
+- Call viz.start() to begin the render loop
+
+The control bar (HBox at top) must contain:
+- A Label "Visualizer:" and ComboBox with options Bars, Oscilloscope, Circular,
+  Spectrogram. On change, call viz.setMode() with the matching Mode enum value.
+- A Label "Waveform:" and ComboBox with options Sine, Square, Sawtooth, Triangle.
+  On change, call synth.setWaveType() with the matching WaveType enum value.
+- HBox spacing 12, padding 10, background #12122A, labels white 13px
+
+A shutdown() method must call capture.stop() and synth.shutdown().
+This is called from stage.setOnCloseRequest() in MainApp.
+
+Show the complete class.
+
+------------------------------------------------------------
+PROMPT 9 — BUG FIX TEMPLATE
+Replace the bracketed sections with your actual error and paste into any AI.
+------------------------------------------------------------
+I am working on the MusicVisualizer JavaFX project. I have a bug in [CLASSNAME].
+
+The error is:
+[PASTE FULL STACK TRACE HERE]
+
+The relevant code is:
+[PASTE THE METHOD OR CLASS WHERE THE ERROR OCCURS]
+
+The program should [DESCRIBE WHAT IT IS SUPPOSED TO DO].
+
+Please identify the root cause and provide the corrected version of the code.
+
+------------------------------------------------------------
+PROMPT 10 — ADD PRESET MANAGER
+Use this after the base project is working to add the preset save/load feature.
+------------------------------------------------------------
+I have a working MusicVisualizer JavaFX application with these classes already
+implemented: AudioCapture, WaveformBuffer, FFTProcessor, BeatDetector,
+SynthEngine, ADSREnvelope, VisualizerCanvas, PianoKeyboard, MainLayout.
+
+I want to add a Preset Manager. Please create:
+
+1. SynthPreset.java in com.musicviz.model
+   A plain Java object with fields: String name, String waveType,
+   double attackMs, double decayMs, double sustainLevel, double releaseMs.
+   Include a constructor, getters, and setters.
+
+2. JsonUtil.java in com.musicviz.util
+   Uses Gson to save and load a List<SynthPreset> to/from a file at
+   src/main/resources/presets/presets.json.
+   Methods: void save(List<SynthPreset> presets), List<SynthPreset> load()
+   Handle FileNotFoundException by returning an empty list.
+
+3. Modifications to MainLayout.java
+   Add to the control bar: a ComboBox<String> showing preset names, a
+   "Save Preset" button that reads current waveType from synth and current
+   ADSR values (use defaults 10, 80, 0.7, 300) into a new SynthPreset,
+   saves it via JsonUtil, and refreshes the ComboBox. Selecting a preset
+   from the ComboBox applies its waveType to synth via setWaveType().
+
+Show complete code for all three files including the updated MainLayout.
+
+
+================================================================================
+SECTION 9 — GRADING CHECKLIST
+================================================================================
+
+Use this to verify all requirements before submission.
+
+[ ] Audio capture works and microphone input drives the visualizer
+[ ] FFT correctly maps audio frequencies to spectrum bins
+[ ] At least 3 visualization modes work (Bars, Oscilloscope, Circular)
+[ ] Beat detection triggers a visible effect (flash or particles)
+[ ] Piano keys produce audible synthesized tones
+[ ] ADSR envelope applied (notes have smooth attack and release)
+[ ] Animation runs smoothly using AnimationTimer (no jerky rendering)
+[ ] Separate packages for audio, ui, model (clean OOP structure)
+[ ] UI controls change behavior live (mode dropdown, waveform dropdown)
+[ ] Application closes cleanly without audio thread hanging
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

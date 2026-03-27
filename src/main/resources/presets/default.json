@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Default Sine",
+    "waveType": "SINE",
+    "attackMs": 10.0,
+    "decayMs": 80.0,
+    "sustainLevel": 0.7,
+    "releaseMs": 300.0
+  },
+  {
+    "name": "Punchy Square",
+    "waveType": "SQUARE",
+    "attackMs": 5.0,
+    "decayMs": 50.0,
+    "sustainLevel": 0.5,
+    "releaseMs": 150.0
+  },
+  {
+    "name": "Warm Sawtooth",
+    "waveType": "SAW",
+    "attackMs": 20.0,
+    "decayMs": 100.0,
+    "sustainLevel": 0.8,
+    "releaseMs": 400.0
+  }
+]
